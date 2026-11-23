@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - ".github/workflows/daily-research.yml"
+      - "daily_input.json"
   schedule:
     - cron: "30 7 * * 1-5"
   workflow_dispatch:
