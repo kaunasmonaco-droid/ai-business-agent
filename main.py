@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 
 MAX_SITES = 10
-MAX_BYTES = 400_000
+MAX_BYTES = 1_200_000
 USER_AGENT = "AIBusinessOS-CompanyResearch/0.1 (+public-source-verification)"
 GENERIC_PREFIXES = ("info", "hello", "contact", "sales", "export", "office", "enquiries", "inquiries", "support")
 
