@@ -1,0 +1,59 @@
+name: AGENT 1 - daily company research
+on:
+  push:
+    paths:
+      - ".github/workflows/daily-research.yml"
+  schedule:
+    - cron: "30 7 * * 1-5"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run company research
+        run: |
+          python main.py --input daily_input.json --output agent-results.json > agent-run.log
+      - name: Publish readable run report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          path = "agent-results.json"
+          data = json.load(open(path,encoding="utf-8")) if os.path.exists(path) else []
+          rows = ["# AI BUSINESS OS - AGENT 1",
+                  "Patikros laikas: " + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                  "",
+                  "| Svetainė | Būsena | Rasti raktažodžiai |",
+                  "|---|---|---|"]
+          for record in data:
+              url = str(record.get("source_url","")).replace("|","/")
+              status = "OK" if record.get("status") == "ok" else "KLAIDA: " + str(record.get("error","nežinoma"))[:80].replace("|","/")
+              matched = ", ".join(record.get("keyword_matches",[])) or "-"
+              rows.append("| " + url + " | " + status + " | " + matched + " |")
+          if not data:
+              rows.append("| Nėra | Rezultato failas nesukurtas | - |")
+          rows.extend(["", "Tai TIK viešų svetainių analizė. Tikras pirkėjų susidomėjimas ar užsakymai nepatvirtinti.",
+                       "Visas JSON: agent-json-report (Actions artefaktas).",
+                       "Mokamų API nenaudojama; naudojamos GitHub Actions plano minutės."])
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as f:
+              f.write("\n".join(rows) + "\n")
+          PY
+      - name: Upload research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-json-report
+          path: |
+            agent-results.json
+            agent-run.log
+          if-no-files-found: warn
+          retention-days: 7
