@@ -4,6 +4,7 @@ on:
     paths:
       - ".github/workflows/daily-research.yml"
       - "daily_input.json"
+      - "main.py"
   schedule:
     - cron: "30 7 * * 1-5"
   workflow_dispatch:
