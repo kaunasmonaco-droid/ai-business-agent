@@ -4,6 +4,8 @@ No fabricated leads. Each candidate carries a public source URL.
 """
 import json
 import re
+import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -75,12 +77,50 @@ def _wikidata(country):
             yield site, name, source
 
 
+
+def _search_rss(country):
+    """Discover candidate websites from a public search RSS feed.
+
+    Search results are leads only; main.py downloads and checks each website
+    before accepting it. Search engine pages and directory URLs are excluded.
+    """
+    terms = {
+        "LT": ("metalo apdirbimas gamyba Lietuva", "metalo konstrukcijų gamyba Lietuva",
+               "CNC metalo gamyba Lithuania"),
+        "DE": ("Metallverarbeitung Hersteller Deutschland", "Blechbearbeitung Hersteller Deutschland"),
+        "PL": ("obróbka metali producent Polska", "konstrukcje stalowe producent Polska"),
+    }.get(country, (f"metal fabrication manufacturers {country}",))
+    excluded = ("bing.com", "google.com", "facebook.com", "linkedin.com",
+                "youtube.com", "wikipedia.org", "rekvizitai.lt", "imones.lt")
+    errors = []
+    for term in terms:
+        url = "https://www.bing.com/search?" + urlencode({"q": term, "format": "rss", "count": "20"})
+        try:
+            request = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AI-Business-OS/0.6)",
+                                            "Accept": "application/rss+xml, application/xml, text/xml"})
+            with urlopen(request, timeout=12) as response:
+                raw = response.read(500_001)
+            if len(raw) > 500_000:
+                raise ValueError("Oversized RSS feed")
+            root = ET.fromstring(raw)
+            for item in root.findall(".//item"):
+                link = (item.findtext("link") or "").strip()
+                title = (item.findtext("title") or "").strip()
+                host = (urlsplit(link).hostname or "").lower()
+                if (link.startswith("https://") and title and host and
+                        not any(host == d or host.endswith("." + d) for d in excluded)):
+                    yield link, title[:160], url
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError, ET.ParseError) as exc:
+            errors.append(f"{type(exc).__name__}: {str(exc)[:70]}")
+    if errors and len(errors) == len(terms):
+        raise RuntimeError("RSS searches failed: " + " | ".join(errors))
+
 def find_websites(country):
     if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
     seen = set()
     errors = []
-    for provider in (_osm, _wikidata):
+    for provider in (_search_rss, _osm, _wikidata):
         try:
             for site, name, source in provider(country):
                 if site in seen:
