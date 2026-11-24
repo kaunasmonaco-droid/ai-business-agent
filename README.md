@@ -38,8 +38,7 @@ Run a **real live website test**, review the extraction results, connect the Act
 
 The agent qualifies supplied company websites against `keywords` and checks
 for a generic business email on the same domain. It uses public evidence as
-context, not as proof of buying intent. It does not search the open web for
-new website URLs.
+context, not as proof of buying intent.
 
 For an Apify run, configure `HUBSPOT_ACCESS_TOKEN` as a secret environment
 variable with company read/write access. Enable `sales_pipeline` in Actor
@@ -55,3 +54,10 @@ python main.py --from-results results.json --company-domain example.com --drafts
 
 To write via the HubSpot API, provide the secret environment variable and
 add `--sync-hubspot`. Keep write-enabled runs for the same domain serialized.
+
+For automatic discovery, leave the URL list empty and set
+`discovery_country` (for example, `LT`). The agent uses public
+OpenStreetMap metal construction and metal processing listings with named
+businesses and websites, then verifies up to 10 sites. Availability depends
+on mapping coverage. With HubSpot enabled, consider previewing the result
+first and limiting the CRM trial to a selected domain.

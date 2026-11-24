@@ -2,6 +2,8 @@
 import argparse
 import csv
 import io
+import http.client
+import ssl
 import ipaddress
 import json
 import os
@@ -14,7 +16,8 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
-from sales import build_drafts
+from discovery import find_websites
+from sales import build_drafts, company_domain
 
 MAX_SITES = 10
 MAX_BYTES = 1_200_000
@@ -82,32 +85,51 @@ def public_dns(host):
     ips = {record[4][0] for record in records}
     if not ips or any(not ipaddress.ip_address(ip).is_global for ip in ips):
         raise ValueError("Target resolved to a non-public address")
+    return sorted(ips)
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+class PublicHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        addresses = public_dns(self.host)
+        error = None
+        for address in addresses:
+            try:
+                raw = socket.create_connection((address, self.port), self.timeout)
+                try:
+                    self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+                except BaseException:
+                    raw.close()
+                    raise
+                return
+            except OSError as exc:
+                error = exc
+        raise error
+
 
 def download_page(url):
-    opener = urllib.request.build_opener(NoRedirect)
     for _ in range(3):
         url = validate_public_url(url)
-        public_dns(urllib.parse.urlsplit(url).hostname)
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+        parsed = urllib.parse.urlsplit(url)
+        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        connection = PublicHTTPSConnection(parsed.hostname, timeout=9, context=ssl.create_default_context())
         try:
-            with opener.open(req, timeout=9) as res:
-                content_type = (res.headers.get("Content-Type") or "").lower()
+            connection.request("GET", path, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+            with connection.getresponse() as response:
+                if response.status in (301, 302, 303, 307, 308) and response.getheader("Location"):
+                    url = urllib.parse.urljoin(url, response.getheader("Location"))
+                    continue
+                if not 200 <= response.status < 300:
+                    raise ValueError(f"Website returned HTTP {response.status}")
+                content_type = (response.getheader("Content-Type") or "").lower()
                 if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
                     raise ValueError("Not an HTML page")
-                data = res.read(MAX_BYTES + 1)
+                data = response.read(MAX_BYTES + 1)
                 if len(data) > MAX_BYTES:
                     raise ValueError("Page too large")
                 return url, data.decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
-                url = urllib.parse.urljoin(url, e.headers["Location"])
-                continue
-            raise
+        finally:
+            connection.close()
     raise ValueError("Too many redirects")
+
 
 def profile_one(url, keywords=None, fetcher=download_page):
     validated_url = validate_public_url(url)
@@ -135,6 +157,26 @@ def profile_one(url, keywords=None, fetcher=download_page):
 
 def run(payload, fetcher=download_page):
     urls = payload.get("urls", []) if isinstance(payload, dict) else []
+    candidates = {}
+    country = payload.get("discovery_country") if isinstance(payload, dict) else None
+    if country:
+        if urls:
+            raise ValueError("Choose discovery_country or supplied urls, not both")
+        for website, name, source in find_websites(country):
+            try:
+                if website.startswith("http://"):
+                    website = "https://" + website[len("http://"):]
+                website = validate_public_url(website)
+            except ValueError:
+                continue
+            domain = company_domain(website)
+            if domain not in candidates:
+                candidates[domain] = (website, name, source)
+            if len(candidates) == MAX_SITES:
+                break
+        urls = [candidate[0] for candidate in candidates.values()]
+        if not urls:
+            raise ValueError("No mapped business websites found for this country")
     if not isinstance(urls, list) or not (1 <= len(urls) <= MAX_SITES):
         raise ValueError("Provide 1–10 source website URLs")
     keywords = payload.get("keywords", [])
@@ -151,7 +193,13 @@ def run(payload, fetcher=download_page):
             continue
         seen.add(url)
         try:
-            output.append(profile_one(url, keywords, fetcher=fetcher))
+            record = profile_one(url, keywords, fetcher=fetcher)
+            if candidates:
+                original_domain = company_domain(url)
+                if original_domain != company_domain(record["source_url"]):
+                    raise ValueError("Discovered website redirected to another domain")
+                _, record["company_name"], record["discovery_source_url"] = candidates[original_domain]
+            output.append(record)
         except Exception as e:
             output.append({"source_url": str(url), "status": "error",
                            "error": str(e)[:220], "verified_buyer_interest": False})

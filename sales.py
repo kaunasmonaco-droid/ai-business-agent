@@ -53,7 +53,7 @@ def build_drafts(records, token=None, only_domain=None):
         if not email or not evidence:
             continue
         seen.add(domain)
-        name = domain.split(".")[0].replace("-", " ").title()
+        name = record.get("company_name") or domain.split(".")[0].replace("-", " ").title()
         company_id, crm_status = sync_company(token, domain, name) if token else (None, "preview")
         topics = ", ".join(dict.fromkeys(record["keyword_matches"]))
         drafts.append({
