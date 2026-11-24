@@ -172,6 +172,31 @@ def _metal_manufacturer(record):
     return any(term in text for term in phrases)
 
 
+def _qualified_discovery_site(record, country):
+    """Conservative screening: official-looking manufacturing site, not an article."""
+    url = urllib.parse.urlsplit(record.get("source_url") or "")
+    host = (url.hostname or "").lower()
+    path = url.path.lower()
+    if any(segment in path for segment in ("/blog/", "/articles/", "/article/", "/news/",
+                                           "/what-is-", "/wiki/", "/guides/", "/tutorial/")):
+        return False
+    if any(host == domain or host.endswith("." + domain) for domain in
+           ("thomasnet.com", "cnccookbook.com", "medium.com", "substack.com",
+            "youtube.com", "wikipedia.org", "linkedin.com", "facebook.com",
+            "reddit.com", "machinedesign.com")):
+        return False
+    if country == "LT" and not (host == "lt" or host.endswith(".lt")):
+        # A foreign TLD may still be Lithuanian, but must be reviewed manually.
+        return False
+    text = " ".join(str(record.get(k) or "") for k in
+                    ("title", "description", "public_evidence_excerpt")).lower()
+    production = ("gaminame", "gaminami", "gaminame pagal", "gamybos paslaug",
+                  "teikiame", "mūsų gamyba", "mūsų įmonė", "mūsų cech",
+                  "manufactur", "we produce", "we fabricate", "our factory",
+                  "production facilities", "production services", "our workshop")
+    return _metal_manufacturer(record) and any(term in text for term in production)
+
+
 def run(payload, fetcher=download_page):
     if not isinstance(payload, dict):
         raise ValueError("Input must be an object")
@@ -208,7 +233,7 @@ def run(payload, fetcher=download_page):
             record = profile_one(website, keywords, fetcher=fetcher)
             if company_domain(record["source_url"]) != domain:
                 continue
-            if country and not _metal_manufacturer(record):
+            if country and not _qualified_discovery_site(record, country):
                 continue
             if country:
                 record["company_name"] = name
