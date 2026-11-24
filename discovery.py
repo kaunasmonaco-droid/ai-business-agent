@@ -10,13 +10,15 @@ from urllib.error import HTTPError, URLError
 def find_websites(country):
     if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
-    query = f"""[out:json][timeout:20];
+    query = f"""[out:json][timeout:25];
 area["ISO3166-1"="{country}"]["admin_level"="2"]->.country;
 (
   nwr["craft"="metal_construction"]["website"](area.country);
   nwr["craft"="metal_construction"]["contact:website"](area.country);
   nwr["industrial"="metal_processing"]["website"](area.country);
   nwr["industrial"="metal_processing"]["contact:website"](area.country);
+  nwr["craft"="metalworking"]["website"](area.country);
+  nwr["craft"="metalworking"]["contact:website"](area.country);
 );
 out tags 100;"""
     # Prefer GET as some restricted runtimes block outgoing POST requests.
@@ -41,7 +43,7 @@ out tags 100;"""
                 method=method,
             )
             try:
-                with urlopen(request, timeout=12) as response:
+                with urlopen(request, timeout=18) as response:
                     raw = response.read(1_000_001)
                 if len(raw) > 1_000_000:
                     raise ValueError("Oversized Overpass response")
@@ -57,7 +59,7 @@ out tags 100;"""
         if payload is not None:
             break
     if payload is None:
-        # Keep the Actor successful while reporting a real provider failure.
+        # Discovery provider failures are reported as an empty candidate set.
         return
     if payload.get("remark"):
         raise ValueError("OpenStreetMap discovery returned an incomplete result")
