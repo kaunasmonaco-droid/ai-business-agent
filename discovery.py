@@ -85,12 +85,12 @@ def _search_rss(country):
     before accepting it. Search engine pages and directory URLs are excluded.
     """
     terms = {
-        "LT": ("metalo apdirbimas gamyba Lietuva", "metalo konstrukcijų gamyba Lietuva",
-               "CNC metalo gamyba Lithuania"),
+        "LT": ("metalo apdirbimo paslaugos gamintojas site:.lt", "metalo konstrukcijų gamyba įmonė site:.lt",
+               "CNC frezavimas tekinimas gaminame site:.lt"),
         "DE": ("Metallverarbeitung Hersteller Deutschland", "Blechbearbeitung Hersteller Deutschland"),
         "PL": ("obróbka metali producent Polska", "konstrukcje stalowe producent Polska"),
     }.get(country, (f"metal fabrication manufacturers {country}",))
-    excluded = ("imf.org", "worldbank.org", "un.org", "gov", "edu", "pdf", "bing.com", "google.com", "facebook.com", "linkedin.com",
+    excluded = ("thomasnet.com", "cnccookbook.com", "medium.com", "substack.com", "reddit.com", "imf.org", "worldbank.org", "un.org", "gov", "edu", "pdf", "bing.com", "google.com", "facebook.com", "linkedin.com",
                 "youtube.com", "wikipedia.org", "rekvizitai.lt", "imones.lt")
     relevant = ("metal", "metalo", "metall", "steel", "plien", "cnc", "fabricat", "gamyb", "lankst", "suvirin", "obrób", "stalow", "blech")
     errors = []
@@ -108,6 +108,12 @@ def _search_rss(country):
                 link = (item.findtext("link") or "").strip()
                 title = (item.findtext("title") or "").strip()
                 host = (urlsplit(link).hostname or "").lower()
+                path = urlsplit(link).path.lower()
+                if country == "LT" and not host.endswith(".lt"):
+                    continue
+                if any(part in path for part in ("/blog/", "/article/", "/articles/", "/news/",
+                                                 "/what-is-", "/wiki/", "/guide/", "/tutorial/")):
+                    continue
                 if (link.startswith("https://") and title and host and
                         not urlsplit(link).path.lower().endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx")) and
                         any(word in title.lower() or word in host for word in relevant) and
