@@ -39,7 +39,7 @@ out tags 100;"""
         except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
             errors.append(type(exc).__name__)
     if data is None:
-        raise RuntimeError("Overpass discovery unavailable: " + ", ".join(errors))
+        return
     if len(data) > 1_000_000:
         raise ValueError("OpenStreetMap discovery response is too large")
     payload = json.loads(data)
