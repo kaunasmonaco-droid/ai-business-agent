@@ -140,5 +140,8 @@ def find_websites(country):
                     return
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             errors.append(f"{provider.__name__}: {type(exc).__name__}: {str(exc)[:140]}")
+    # No candidates is a valid outcome when public providers time out or return
+    # nothing. Let the caller emit a transparent no_qualified_companies record
+    # rather than failing the entire Actor run.
     if not seen:
-        raise RuntimeError("Discovery providers unavailable or returned no matching companies: " + " | ".join(errors))
+        return
