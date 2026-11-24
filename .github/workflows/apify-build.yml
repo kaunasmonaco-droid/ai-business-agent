@@ -52,7 +52,7 @@ jobs:
                       return json.load(res)["data"]
               except urllib.error.HTTPError as exc:
                   raise RuntimeError(f"Apify API HTTP {exc.code}; verify actor access and token scopes") from None
-          data = request(base + "?waitForFinish=0", "POST")
+          data = request(base + "?version=0.0&waitForFinish=0", "POST")
           build_id = data.get("id")
           if not build_id:
               raise RuntimeError("Apify did not return build id")
