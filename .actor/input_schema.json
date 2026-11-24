@@ -28,6 +28,18 @@
         "metal",
         "export"
       ]
+    },
+    "sales_pipeline": {
+      "title": "Enable HubSpot and proposal drafts",
+      "type": "boolean",
+      "description": "Sync qualified company records and store unsent proposals.",
+      "default": false
+    },
+    "company_domain": {
+      "title": "Only this company domain",
+      "type": "string",
+      "editor": "textfield",
+      "description": "Optional scope for a one-company trial, e.g. example.com."
     }
   },
   "required": [

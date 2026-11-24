@@ -14,6 +14,8 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
+from sales import build_drafts
+
 MAX_SITES = 10
 MAX_BYTES = 1_200_000
 USER_AGENT = "AIBusinessOS-CompanyResearch/0.1 (+public-source-verification)"
@@ -141,6 +143,10 @@ def run(payload, fetcher=download_page):
     output = []
     seen = set()
     for url in urls:
+        if not isinstance(url, str):
+            output.append({"status": "error", "error": "URL must be a string",
+                           "verified_buyer_interest": False})
+            continue
         if url in seen:
             continue
         seen.add(url)
@@ -182,7 +188,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", help="Local JSON input path, no API token required")
     parser.add_argument("--output", help="Optional JSON output path")
+    parser.add_argument("--from-results", help="Replay an existing Apify JSON export")
+    parser.add_argument("--drafts", help="Write proposal drafts to this JSON path")
+    parser.add_argument("--company-domain", help="Process only this domain in the sales stage")
+    parser.add_argument("--sync-hubspot", action="store_true", help="Write to HubSpot using HUBSPOT_ACCESS_TOKEN")
     args = parser.parse_args()
+    if args.input and args.from_results:
+        parser.error("Choose either --input or --from-results")
+    if args.sync_hubspot and not args.drafts:
+        parser.error("--sync-hubspot requires --drafts")
+    if args.from_results:
+        with open(args.from_results, encoding="utf-8") as stream:
+            result = json.load(stream)
+        if not isinstance(result, list) or not all(isinstance(row, dict) for row in result):
+            parser.error("Expected a JSON array of Apify result objects")
+        write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
+        return
+    actor_mode = not args.input
     if args.input:
         with open(args.input, encoding="utf-8") as stream:
             payload = json.load(stream)
@@ -196,8 +218,40 @@ def main():
     if args.output:
         with open(args.output, "w", encoding="utf-8") as stream:
             stream.write(output + "\n")
-    if not args.input:
+    if actor_mode:
         apify_push(result)
+    if args.drafts:
+        write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
+    elif actor_mode and payload.get("sales_pipeline") is True:
+        drafts = write_drafts(result, None, payload.get("company_domain"), True)
+        save_apify_drafts(drafts)
+
+def write_drafts(records, path, domain, sync):
+    token = os.getenv("HUBSPOT_ACCESS_TOKEN") if sync else None
+    if sync and not token:
+        raise SystemExit("HUBSPOT_ACCESS_TOKEN is required for CRM writes")
+    drafts = build_drafts(records, token, domain)
+    if not drafts:
+        raise SystemExit("No qualified companies with same-domain public business contacts")
+    if path:
+        with open(path, "w", encoding="utf-8") as stream:
+            json.dump(drafts, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+    return drafts
+
+
+def save_apify_drafts(drafts):
+    store = os.environ["APIFY_DEFAULT_KEY_VALUE_STORE_ID"]
+    token = os.environ["APIFY_TOKEN"]
+    base = os.getenv("APIFY_API_BASE_URL", "https://api.apify.com").rstrip("/")
+    endpoint = f"{base}/v2/key-value-stores/{urllib.parse.quote(store, safe='')}/records/PROPOSAL_DRAFTS"
+    request = urllib.request.Request(
+        endpoint, method="PUT", data=json.dumps(drafts, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=20):
+        pass
+
 
 if __name__ == "__main__":
     main()

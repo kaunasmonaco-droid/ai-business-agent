@@ -33,3 +33,25 @@ python -m unittest discover -s tests -v
 
 ## Next milestone
 Run a **real live website test**, review the extraction results, connect the Actor through the user's own Apify account, and only then evaluate store eligibility and pricing.
+
+## Sales pipeline (opt-in)
+
+The agent qualifies supplied company websites against `keywords` and checks
+for a generic business email on the same domain. It uses public evidence as
+context, not as proof of buying intent. It does not search the open web for
+new website URLs.
+
+For an Apify run, configure `HUBSPOT_ACCESS_TOKEN` as a secret environment
+variable with company read/write access. Enable `sales_pipeline` in Actor
+input. For a one-company trial, also set `company_domain`, e.g. `example.com`.
+The research dataset stays separate and the run's key-value store receives
+unsent drafts at `PROPOSAL_DRAFTS`. No email is sent.
+
+Replay an existing export without accessing HubSpot:
+
+```sh
+python main.py --from-results results.json --company-domain example.com --drafts drafts.json
+```
+
+To write via the HubSpot API, provide the secret environment variable and
+add `--sync-hubspot`. Keep write-enabled runs for the same domain serialized.
