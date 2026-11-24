@@ -155,54 +155,76 @@ def profile_one(url, keywords=None, fetcher=download_page):
         "status": "ok",
     }
 
+def _metal_manufacturer(record):
+    """Require specific production evidence, not generic words such as 'gamyba'."""
+    text = " ".join(str(record.get(k) or "") for k in
+                    ("title", "description", "public_evidence_excerpt")).lower()
+    negatives = ("kolegija", "college", "university", "universitet", "academy",
+                 "akademija", "supermarket", "grocery", "prekybos tinklas",
+                 "bank", "ministerija", "municipality", "school")
+    if any(term in text for term in negatives):
+        return False
+    phrases = ("metalo apdirb", "metalo konstrukc", "metalo gamyb",
+               "metalo lankst", "metalo pjov", "metalo suvirin",
+               "lakštinio metalo", "cnc machining", "metal fabrication",
+               "metalworking", "sheet metal", "steel fabrication",
+               "metallbearbeitung", "blechbearbeitung", "obróbka metali")
+    return any(term in text for term in phrases)
+
+
 def run(payload, fetcher=download_page):
-    urls = payload.get("urls", []) if isinstance(payload, dict) else []
-    candidates = {}
-    country = payload.get("discovery_country") if isinstance(payload, dict) else None
-    if country:
-        if urls:
-            raise ValueError("Choose discovery_country or supplied urls, not both")
-        for website, name, source in find_websites(country):
-            try:
-                if website.startswith("http://"):
-                    website = "https://" + website[len("http://"):]
-                website = validate_public_url(website)
-            except ValueError:
-                continue
-            domain = company_domain(website)
-            if domain not in candidates:
-                candidates[domain] = (website, name, source)
-            if len(candidates) == MAX_SITES:
-                break
-        urls = [candidate[0] for candidate in candidates.values()]
-        if not urls:
-            return [{"status": "discovery_unavailable", "country": country, "error": "No verified business websites returned by discovery providers", "verified_buyer_interest": False}]
-    if not isinstance(urls, list) or not (1 <= len(urls) <= MAX_SITES):
-        raise ValueError("Provide 1–10 source website URLs")
+    if not isinstance(payload, dict):
+        raise ValueError("Input must be an object")
+    urls = payload.get("urls", [])
+    country = payload.get("discovery_country")
+    if country and urls:
+        raise ValueError("Choose discovery_country or supplied urls, not both")
     keywords = payload.get("keywords", [])
     if not isinstance(keywords, list):
         raise ValueError("keywords must be an array")
     output = []
     seen = set()
-    for url in urls:
-        if not isinstance(url, str):
-            output.append({"status": "error", "error": "URL must be a string",
-                           "verified_buyer_interest": False})
-            continue
-        if url in seen:
-            continue
-        seen.add(url)
+    if country:
+        candidates = find_websites(country)
+    else:
+        if not isinstance(urls, list) or not 1 <= len(urls) <= MAX_SITES:
+            raise ValueError("Provide 1-10 source website URLs")
+        candidates = ((url, None, None) for url in urls)
+    attempted = 0
+    for website, name, source in candidates:
+        if country and attempted >= 40:
+            break
         try:
-            record = profile_one(url, keywords, fetcher=fetcher)
-            if candidates:
-                original_domain = company_domain(url)
-                if original_domain != company_domain(record["source_url"]):
-                    raise ValueError("Discovered website redirected to another domain")
-                _, record["company_name"], record["discovery_source_url"] = candidates[original_domain]
+            if not isinstance(website, str):
+                continue
+            if website.startswith("http://"):
+                website = "https://" + website[7:]
+            website = validate_public_url(website)
+            domain = company_domain(website)
+            if domain in seen:
+                continue
+            seen.add(domain)
+            attempted += 1
+            record = profile_one(website, keywords, fetcher=fetcher)
+            if company_domain(record["source_url"]) != domain:
+                continue
+            if country and not _metal_manufacturer(record):
+                continue
+            if country:
+                record["company_name"] = name
+                record["discovery_source_url"] = source
             output.append(record)
-        except Exception as e:
-            output.append({"source_url": str(url), "status": "error",
-                           "error": str(e)[:220], "verified_buyer_interest": False})
+        except Exception as exc:
+            if not country:
+                output.append({"source_url": str(website), "status": "error",
+                               "error": str(exc)[:220], "verified_buyer_interest": False})
+        if len(output) >= MAX_SITES:
+            break
+    if country and not output:
+        return [{"status": "no_qualified_companies", "country": country,
+                 "attempted_sites": attempted,
+                 "error": "No verified metal manufacturing websites found in this run",
+                 "verified_buyer_interest": False}]
     return output
 
 def apify_get_input():
