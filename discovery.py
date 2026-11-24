@@ -90,8 +90,9 @@ def _search_rss(country):
         "DE": ("Metallverarbeitung Hersteller Deutschland", "Blechbearbeitung Hersteller Deutschland"),
         "PL": ("obróbka metali producent Polska", "konstrukcje stalowe producent Polska"),
     }.get(country, (f"metal fabrication manufacturers {country}",))
-    excluded = ("bing.com", "google.com", "facebook.com", "linkedin.com",
+    excluded = ("imf.org", "worldbank.org", "un.org", "gov", "edu", "pdf", "bing.com", "google.com", "facebook.com", "linkedin.com",
                 "youtube.com", "wikipedia.org", "rekvizitai.lt", "imones.lt")
+    relevant = ("metal", "metalo", "metall", "steel", "plien", "cnc", "fabricat", "gamyb", "lankst", "suvirin", "obrób", "stalow", "blech")
     errors = []
     for term in terms:
         url = "https://www.bing.com/search?" + urlencode({"q": term, "format": "rss", "count": "20"})
@@ -108,6 +109,8 @@ def _search_rss(country):
                 title = (item.findtext("title") or "").strip()
                 host = (urlsplit(link).hostname or "").lower()
                 if (link.startswith("https://") and title and host and
+                        not urlsplit(link).path.lower().endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx")) and
+                        any(word in title.lower() or word in host for word in relevant) and
                         not any(host == d or host.endswith("." + d) for d in excluded)):
                     yield link, title[:160], url
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, ET.ParseError) as exc:
