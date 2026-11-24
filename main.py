@@ -176,7 +176,7 @@ def run(payload, fetcher=download_page):
                 break
         urls = [candidate[0] for candidate in candidates.values()]
         if not urls:
-            raise ValueError("No mapped business websites found for this country")
+            return [{"status": "discovery_unavailable", "country": country, "error": "No verified business websites returned by discovery providers", "verified_buyer_interest": False}]
     if not isinstance(urls, list) or not (1 <= len(urls) <= MAX_SITES):
         raise ValueError("Provide 1–10 source website URLs")
     keywords = payload.get("keywords", [])
