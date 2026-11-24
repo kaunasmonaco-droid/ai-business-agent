@@ -21,15 +21,15 @@ area["ISO3166-1"="{country}"]["admin_level"="2"]->.country;
 out tags 100;"""
     data = None
     errors = []
-    for endpoint in ("https://overpass.kumi.systems/api/interpreter",
-                     "https://overpass.nchc.org.tw/api/interpreter",
-                     "https://overpass-api.de/api/interpreter"):
+    for endpoint in ("https://overpass-api.de/api/interpreter",
+                     "https://overpass.private.coffee/api/interpreter",
+                     "https://overpass.nchc.org.tw/api/interpreter"):
         request = Request(endpoint, data=urlencode({"data": query}).encode(),
                           headers={"User-Agent": "AI-Business-OS/0.3",
                                    "Content-Type": "application/x-www-form-urlencoded"},
                           method="POST")
         try:
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=8) as response:
                 candidate = response.read(1_000_001)
             parsed = json.loads(candidate)
             if len(candidate) > 1_000_000 or parsed.get("remark") or not isinstance(parsed.get("elements"), list):
