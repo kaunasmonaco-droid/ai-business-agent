@@ -59,8 +59,8 @@ out tags 100;"""
         if payload is not None:
             break
     if payload is None:
-        # Discovery provider failures are reported as an empty candidate set.
-        return
+        # Preserve provider failures for diagnosis instead of silently treating them as no companies.
+        raise RuntimeError("Discovery providers unreachable: " + ", ".join(errors[-8:]))
     if payload.get("remark"):
         raise ValueError("OpenStreetMap discovery returned an incomplete result")
     for element in payload["elements"]:
