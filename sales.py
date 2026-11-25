@@ -101,14 +101,14 @@ def build_drafts(records, token=None, only_domain=None):
             "source_url": source,
             "source_evidence": re.sub(r"\s+", " ", evidence)[:500],
             "recipient": email,
-            "subject": f"Potencialių {name} verslo klientų atranka Vokietijoje",
+            "subject": f"Potencialių {name} verslo klientų atranka tarptautinėse rinkose",
             "body": (
                 f"Sveiki, {name} komanda,\n\n"
                 f"Peržiūrėjau jūsų viešą įmonės informaciją. Pagal joje rastas temas ({topics}) "
-                "siūlau aptarti, kurioms jūsų paslaugoms verta ieškoti naujų užsakovų Vokietijoje. "
+                "siūlau aptarti, kurioms jūsų paslaugoms verta ieškoti naujų užsakovų Europoje ir kitose tarptautinėse rinkose. "
                 "Galiu parengti 10 potencialių įmonių sąrašą su viešais verslo kontaktais, "
                 "šaltiniais ir atrankos pagrindimu.\n\n"
-                "Ar Vokietija dabar aktuali? Kurią jūsų paslaugą reikėtų įtraukti pirmiausia?\n\nJulius"
+                "Kurios eksporto rinkos dabar aktualiausios? Kurią jūsų paslaugą reikėtų įtraukti pirmiausia?\n\nJulius"
             ),
             "status": "draft",
         })
