@@ -318,7 +318,10 @@ def main():
     if args.drafts:
         write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
     elif actor_mode and payload.get("sales_pipeline") is True:
-        drafts = write_drafts(result, None, payload.get("company_domain"), False)
+        sync = payload.get("sync_hubspot") is True
+        if sync and not payload.get("company_domain"):
+            raise ValueError("Specify company_domain for a scoped CRM sync")
+        drafts = write_drafts(result, None, payload.get("company_domain"), sync)
         save_apify_drafts(drafts)
 
 def write_drafts(records, path, domain, sync):
