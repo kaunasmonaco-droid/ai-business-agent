@@ -138,7 +138,19 @@ def profile_one(url, keywords=None, fetcher=download_page):
     parser.feed(html)
     body = re.sub(r"\s+", " ", " ".join(parser.parts))[:7000]
     words = [str(x).strip().lower() for x in (keywords or []) if str(x).strip()][:10]
-    matches = [word for word in words if word in body.lower()]
+    translations = {
+        "cnc frezavimas": "cnc milling",
+        "cnc tekinimas": "cnc turning",
+        "suvirinimas": "welding",
+        "metalo pjovimas lazeriu": "laser cutting",
+        "lakstinio metalo lankstymas": "sheet metal bending",
+    }
+    evidence = body.casefold()
+    matches = []
+    for word in words:
+        for term in (word, translations.get(word)):
+            if term and term in evidence and term not in matches:
+                matches.append(term)
     emails = re.findall(r"(?i)(?<![\w.+-])([\w.+-]+@[\w.-]+\.[a-z]{2,})(?![\w.-])", html)
     generic = sorted({e.lower() for e in emails if e.split("@")[0].lower() in GENERIC_PREFIXES})[:5]
     return {
