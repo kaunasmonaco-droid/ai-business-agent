@@ -1,6 +1,6 @@
 {
   "title": "Research company websites",
-  "description": "Discover metalworking businesses in a country or verify 1\u201310 supplied official websites.",
+  "description": "Discover metalworking businesses in a country or verify 1–10 supplied official websites.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
@@ -8,7 +8,7 @@
       "title": "Official company website URLs",
       "type": "array",
       "editor": "stringList",
-      "description": "1\u201310 public HTTPS websites; no internal URLs or private data.",
+      "description": "1–10 public HTTPS websites; no internal URLs or private data.",
       "items": {
         "type": "string"
       },
@@ -46,6 +46,12 @@
       "type": "string",
       "editor": "textfield",
       "description": "Optional two-letter uppercase country code, for example LT. Leave URLs empty for discovery."
+    },
+    "sync_hubspot": {
+      "title": "Sync the selected company with HubSpot",
+      "type": "boolean",
+      "description": "Requires sales_pipeline, company_domain and a secret HUBSPOT_ACCESS_TOKEN.",
+      "default": false
     }
   }
 }
