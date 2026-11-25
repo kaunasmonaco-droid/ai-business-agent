@@ -2,6 +2,7 @@
 
 import json
 import re
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -21,6 +22,35 @@ def hubspot_request(token, path, payload):
         return json.load(response)
 
 
+DOMAIN_KEY = "ai_business_os_domain"
+
+
+def ensure_domain_key(token):
+    endpoint = "https://api.hubapi.com/crm/v3/properties/companies"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    def read_key():
+        req = Request(endpoint + "/" + DOMAIN_KEY, headers=headers)
+        with urlopen(req, timeout=20) as response:
+            return json.load(response)
+    try:
+        prop = read_key()
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+        schema = {"name": DOMAIN_KEY, "label": "AI Business OS domain", "type": "string",
+                  "fieldType": "text", "groupName": "companyinformation", "hasUniqueValue": True}
+        req = Request(endpoint, data=json.dumps(schema).encode(), headers=headers, method="POST")
+        try:
+            with urlopen(req, timeout=20):
+                pass
+        except HTTPError as conflict:
+            if conflict.code != 409:
+                raise
+        prop = read_key()
+    if prop.get("hasUniqueValue") is not True:
+        raise RuntimeError("CRM domain key must enforce uniqueness")
+
+
 def sync_company(token, domain, name):
     result = hubspot_request(token, "/search", {
         "filterGroups": [{"filters": [{"propertyName": "domain", "operator": "EQ", "value": candidate}]}
@@ -33,8 +63,15 @@ def sync_company(token, domain, name):
         raise ValueError(f"Multiple HubSpot companies match {domain}")
     if matches:
         return matches[0]["id"], "existing"
-    result = hubspot_request(token, "", {"properties": {"name": name, "domain": domain}})
-    return result["id"], "created"
+    ensure_domain_key(token)
+    result = hubspot_request(token, "/batch/upsert", {"inputs": [{
+        "idProperty": DOMAIN_KEY, "id": domain,
+        "properties": {"name": name, "domain": domain, DOMAIN_KEY: domain},
+    }]})
+    rows = result.get("results", [])
+    if result.get("status") != "COMPLETE" or result.get("numErrors") or len(rows) != 1:
+        raise RuntimeError("CRM upsert not confirmed")
+    return rows[0]["id"], "created" if rows[0].get("new") else "synced"
 
 
 def build_drafts(records, token=None, only_domain=None):
