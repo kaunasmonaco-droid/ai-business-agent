@@ -357,7 +357,7 @@ def save_apify_drafts(drafts):
     endpoint = f"{base}/v2/key-value-stores/{urllib.parse.quote(store, safe='')}/records/PROPOSAL_DRAFTS"
     request = urllib.request.Request(
         endpoint, method="PUT", data=json.dumps(drafts, ensure_ascii=False).encode("utf-8"),
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
     )
     with urllib.request.urlopen(request, timeout=20):
         pass
