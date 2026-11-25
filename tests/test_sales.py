@@ -26,11 +26,16 @@ class SalesPipelineTests(unittest.TestCase):
         request.assert_called_once()
 
     @patch("sales.hubspot_request")
-    def test_creates_missing_company_after_domain_search(self, request):
-        request.side_effect = [{"results": []}, {"id": "456"}]
+    @patch("sales.ensure_domain_key")
+    def test_creates_missing_company_after_domain_search(self, ensure, request):
+        request.side_effect = [{"results": []}, {"status":"COMPLETE","results":[{"id":"456","new":True}]}]
         draft, = build_drafts([self.record], token="test")
         self.assertEqual(draft["hubspot_company_id"], "456")
-        request.assert_called_with("test", "", {"properties": {"name": "Example", "domain": "example.com"}})
+        ensure.assert_called_once_with("test")
+        path, payload = request.call_args.args[1:]
+        self.assertEqual(path, "/batch/upsert")
+        self.assertEqual(payload["inputs"][0]["idProperty"], "ai_business_os_domain")
+        self.assertEqual(payload["inputs"][0]["id"], "example.com")
 
     @patch("sales.hubspot_request")
     def test_rejects_non_matching_contact_without_crm_write(self, request):
