@@ -74,6 +74,46 @@ def sync_company(token, domain, name):
     return rows[0]["id"], "created" if rows[0].get("new") else "synced"
 
 
+def contact_request(token, path, payload=None, method="GET"):
+    req = Request(
+        "https://api.hubapi.com" + path,
+        data=json.dumps(payload).encode("utf-8") if payload is not None else None,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method=method,
+    )
+    with urlopen(req, timeout=20) as response:
+        raw = response.read()
+        return json.loads(raw) if raw else {}
+
+
+def sync_contact(token, email, company_id):
+    email = email.strip().lower()
+    endpoint = "/crm/v3/objects/contacts"
+    # HubSpot's email identifier enforces contact uniqueness even across runs.
+    from urllib.parse import quote
+    lookup = endpoint + "/" + quote(email, safe="") + "?idProperty=email&properties=email"
+    try:
+        row = contact_request(token, lookup)
+        status = "existing"
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+        try:
+            row = contact_request(token, endpoint, {"properties": {"email": email}}, "POST")
+            status = "created"
+        except HTTPError as conflict:
+            if conflict.code != 409:
+                raise
+            row = contact_request(token, lookup)
+            status = "existing"
+    contact_id = str(row["id"])
+    # Default unlabeled association; do not overwrite contact names or other fields.
+    contact_request(token, "/crm/v4/objects/contacts/" + quote(contact_id, safe="")
+                    + "/associations/default/companies/" + quote(str(company_id), safe=""),
+                    method="PUT")
+    return contact_id, status
+
+
 def build_drafts(records, token=None, only_domain=None):
     drafts = []
     seen = set()
@@ -92,12 +132,15 @@ def build_drafts(records, token=None, only_domain=None):
         seen.add(domain)
         name = record.get("company_name") or domain.split(".")[0].replace("-", " ").title()
         company_id, crm_status = sync_company(token, domain, name) if token else (None, "preview")
+        contact_id, contact_status = sync_contact(token, email, company_id) if token else (None, "preview")
         topics = ", ".join(dict.fromkeys(record["keyword_matches"]))
         drafts.append({
             "company": name,
             "domain": domain,
             "hubspot_company_id": company_id,
             "hubspot_status": crm_status,
+            "hubspot_contact_id": contact_id,
+            "hubspot_contact_status": contact_status,
             "source_url": source,
             "source_evidence": re.sub(r"\s+", " ", evidence)[:500],
             "recipient": email,
