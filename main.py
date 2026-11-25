@@ -318,7 +318,7 @@ def main():
     if args.drafts:
         write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
     elif actor_mode and payload.get("sales_pipeline") is True:
-        drafts = write_drafts(result, None, payload.get("company_domain"), True)
+        drafts = write_drafts(result, None, payload.get("company_domain"), False)
         save_apify_drafts(drafts)
 
 def write_drafts(records, path, domain, sync):
@@ -326,7 +326,7 @@ def write_drafts(records, path, domain, sync):
     if sync and not token:
         raise SystemExit("HUBSPOT_ACCESS_TOKEN is required for CRM writes")
     drafts = build_drafts(records, token, domain)
-    if not drafts:
+    if not drafts and sync:
         raise SystemExit("No qualified companies with same-domain public business contacts")
     if path:
         with open(path, "w", encoding="utf-8") as stream:
