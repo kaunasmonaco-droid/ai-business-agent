@@ -1,16 +1,5 @@
 {
-  "urls": [
-    "https://www.emeko.lt/kontaktai",
-    "https://forge.lt/",
-    "https://www.lankmeta.lt/en/contacts/",
-    "https://www.nermonas.lt/",
-    "https://www.achatas.lt/en/",
-    "https://www.viritas.lt/metalo-konstrukciju-gamyba",
-    "https://www.alumnita.lt/en/contact/",
-    "https://made8.lt/en/contacts",
-    "https://ison.lt/en/about/",
-    "https://www.pmkonstrukcijos.lt/lt/apie-mus"
-  ],
+  "urls": [],
   "keywords": [
     "CNC",
     "welding",
@@ -22,5 +11,8 @@
     "manufacturing",
     "laser",
     "machining"
-  ]
+  ],
+  "discovery_country": "LT",
+  "sales_pipeline": true,
+  "sync_hubspot": false
 }
