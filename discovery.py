@@ -2,6 +2,7 @@
 
 No fabricated leads. Each candidate carries a public source URL.
 """
+from html.parser import HTMLParser
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -124,12 +125,54 @@ def _search_rss(country):
     if errors and len(errors) == len(terms):
         raise RuntimeError("RSS searches failed: " + " | ".join(errors))
 
+class MemberDirectory(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.member = None
+        self.entries = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "article":
+            self.member = {"name": "", "site": "", "parts": []}
+        elif tag == "a" and self.member is not None and "grid-image" in attrs.get("class", "").split():
+            self.member.update(site=attrs.get("href", ""), name=attrs.get("title", ""))
+
+    def handle_data(self, text):
+        if self.member is not None:
+            self.member["parts"].append(text)
+
+    def handle_endtag(self, tag):
+        if tag == "article" and self.member is not None:
+            member = self.member
+            self.member = None
+            description = " ".join(member["parts"]).casefold()
+            if member["name"] and member["site"].startswith(("http://", "https://")) and any(
+                term in description for term in ("cnc", "metalo apdirb", "metalo gamin", "metalo konstrukc", "lakštinio metalo")
+            ):
+                self.entries.append((member["site"], member["name"]))
+
+
+def _linpra(country):
+    if country != "LT":
+        return
+    source = "https://linpra.lt/nariu-sarasas/"
+    with urlopen(Request(source, headers={"User-Agent": AGENT}), timeout=15) as response:
+        page = response.read(2_000_001)
+    if len(page) > 2_000_000:
+        raise ValueError("Member directory too large")
+    parser = MemberDirectory()
+    parser.feed(page.decode("utf-8", errors="replace"))
+    for site, name in parser.entries:
+        yield site, name, source
+
+
 def find_websites(country):
     if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
     seen = set()
     errors = []
-    for provider in (_search_rss, _osm, _wikidata):
+    for provider in (_linpra, _search_rss, _osm, _wikidata):
         try:
             for site, name, source in provider(country):
                 if site in seen:
