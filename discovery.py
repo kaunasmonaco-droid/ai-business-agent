@@ -79,7 +79,7 @@ def _wikidata(country):
 
 
 
-def _search_rss(country):
+def _search_rss(country, custom_queries=None, custom_keywords=None):
     """Discover candidate websites from a public search RSS feed.
 
     Search results are leads only; main.py downloads and checks each website
@@ -92,9 +92,13 @@ def _search_rss(country):
         "DE": ("Metallverarbeitung Hersteller Deutschland", "Blechbearbeitung Hersteller Deutschland"),
         "PL": ("obróbka metali producent Polska", "konstrukcje stalowe producent Polska"),
     }.get(country, (f"metal fabrication manufacturers {country}",))
+    if custom_queries:
+        terms = tuple(custom_queries[:6])
     excluded = ("thomasnet.com", "cnccookbook.com", "medium.com", "substack.com", "reddit.com", "imf.org", "worldbank.org", "un.org", "gov", "edu", "pdf", "bing.com", "google.com", "facebook.com", "linkedin.com",
                 "youtube.com", "wikipedia.org", "rekvizitai.lt", "imones.lt")
     relevant = ("metal", "metalo", "metall", "steel", "plien", "cnc", "fabricat", "gamyb", "lankst", "suvirin", "obrób", "stalow", "blech")
+    if custom_keywords:
+        relevant = tuple(word.casefold() for word in custom_keywords)
     errors = []
     for term in terms:
         url = "https://www.bing.com/search?" + urlencode({"q": term, "format": "rss", "count": "20"})
@@ -166,12 +170,13 @@ def _linpra(country):
         yield site, name, source
 
 
-def find_websites(country):
+def find_websites(country, custom_queries=None, custom_keywords=None):
     if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
     seen = set()
     errors = []
-    for provider in (_linpra, _search_rss, _osm, _wikidata):
+    providers = (lambda c: _search_rss(c, custom_queries, custom_keywords),) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
+    for provider in providers:
         try:
             for site, name, source in provider(country):
                 if site in seen:
