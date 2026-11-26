@@ -232,10 +232,15 @@ def run(payload, fetcher=download_page):
     keywords = payload.get("keywords", [])
     if not isinstance(keywords, list):
         raise ValueError("keywords must be an array")
+    custom_queries = payload.get("search_queries", [])
+    if not isinstance(custom_queries, list) or len(custom_queries) > 6 or any(not isinstance(q, str) or not q.strip() or len(q) > 300 for q in custom_queries):
+        raise ValueError("search_queries must contain up to six nonempty search strings")
+    if custom_queries and (not country or not keywords or any(not isinstance(k, str) or not k.strip() for k in keywords)):
+        raise ValueError("Custom discovery requires country and nonempty keywords")
     output = []
     seen = set()
     if country:
-        candidates = find_websites(country)
+        candidates = find_websites(country, custom_queries, keywords) if custom_queries else find_websites(country)
     else:
         if not isinstance(urls, list) or not 1 <= len(urls) <= MAX_SITES:
             raise ValueError("Provide 1-10 source website URLs")
@@ -261,7 +266,13 @@ def run(payload, fetcher=download_page):
             if country:
                 record["company_name"] = name
                 record["discovery_source_url"] = source
-                if not _qualified_discovery_site(record, country):
+                if custom_queries:
+                    if not record.get("keyword_matches"):
+                        continue
+                    record["lead_priority"] = "B"
+                    record["industry"] = str(payload.get("industry", "custom"))[:100]
+                    record["verification_note"] += " Custom industry candidate; country and commercial fit require review before drafting."
+                elif not _qualified_discovery_site(record, country):
                     continue
             output.append(record)
         except Exception as exc:
@@ -273,7 +284,7 @@ def run(payload, fetcher=download_page):
     if country and not output:
         return [{"status": "no_qualified_companies", "country": country,
                  "attempted_sites": attempted,
-                 "error": "No verified metal manufacturing websites found in this run",
+                 "error": "No matching company websites found in this run",
                  "verified_buyer_interest": False}]
     return output
 
