@@ -237,6 +237,9 @@ def run(payload, fetcher=download_page):
         raise ValueError("search_queries must contain up to six nonempty search strings")
     if custom_queries and (not country or not keywords or any(not isinstance(k, str) or not k.strip() for k in keywords)):
         raise ValueError("Custom discovery requires country and nonempty keywords")
+    result_limit = payload.get("result_limit", MAX_DISCOVERY_RESULTS)
+    if type(result_limit) is not int or not 1 <= result_limit <= MAX_DISCOVERY_RESULTS:
+        raise ValueError("result_limit must be an integer between 1 and 20")
     output = []
     seen = set()
     if country:
@@ -279,7 +282,7 @@ def run(payload, fetcher=download_page):
             if not country:
                 output.append({"source_url": str(website), "status": "error",
                                "error": str(exc)[:220], "verified_buyer_interest": False})
-        if len(output) >= (MAX_DISCOVERY_RESULTS if country else MAX_SITES):
+        if len(output) >= (result_limit if country else MAX_SITES):
             break
     if country and not output:
         return [{"status": "no_qualified_companies", "country": country,
