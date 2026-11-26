@@ -38,7 +38,7 @@ area["ISO3166-1"="{country}"]["admin_level"="2"]->.a;
  nwr["craft"~"metal_construction|metalworking|welder"]["contact:website"](area.a);
  nwr["industrial"~"metal_processing|machine_shop|manufacturing"]["contact:website"](area.a);
 );
-out tags 60;"""
+out tags 100;"""
     encoded = urlencode({"data": query}).encode()
     errors = []
     for endpoint in OVERPASS:
@@ -67,7 +67,7 @@ def _wikidata(country):
       ?item (wdt:P31/wdt:P279*|wdt:P452) ?type.
       VALUES ?type {{ wd:Q4830453 wd:Q783794 wd:Q13235160 }}
       SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,lt". }}
-    }} LIMIT 60"""
+    }} LIMIT 100"""
     url = WIKIDATA + "?" + urlencode({"query": query, "format": "json"})
     result = _read_json(url, timeout=18)
     for binding in result.get("results", {}).get("bindings", []):
@@ -87,7 +87,7 @@ def _search_rss(country):
     """
     terms = {
         "LT": ("metalo apdirbimo paslaugos gamintojas site:.lt", "metalo konstrukcijų gamyba įmonė site:.lt",
-               "CNC frezavimas tekinimas gaminame site:.lt"),
+               "CNC frezavimas tekinimas gaminame site:.lt", "metal fabrication CNC machining Lithuania", "lakštinio metalo apdirbimas lazerinis pjovimas Lietuva", "steel aluminium manufacturing Lithuania"),
         "DE": ("Metallverarbeitung Hersteller Deutschland", "Blechbearbeitung Hersteller Deutschland"),
         "PL": ("obróbka metali producent Polska", "konstrukcje stalowe producent Polska"),
     }.get(country, (f"metal fabrication manufacturers {country}",))
@@ -110,8 +110,6 @@ def _search_rss(country):
                 title = (item.findtext("title") or "").strip()
                 host = (urlsplit(link).hostname or "").lower()
                 path = urlsplit(link).path.lower()
-                if country == "LT" and not host.endswith(".lt"):
-                    continue
                 if any(part in path for part in ("/blog/", "/article/", "/articles/", "/news/",
                                                  "/what-is-", "/wiki/", "/guide/", "/tutorial/")):
                     continue
@@ -179,7 +177,7 @@ def find_websites(country):
                     continue
                 seen.add(site)
                 yield site, name, source
-                if len(seen) >= 40:
+                if len(seen) >= 100:
                     return
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             errors.append(f"{provider.__name__}: {type(exc).__name__}: {str(exc)[:140]}")
