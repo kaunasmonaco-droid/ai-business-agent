@@ -118,7 +118,7 @@ def build_drafts(records, token=None, only_domain=None):
     drafts = []
     seen = set()
     for record in records:
-        if record.get("status") != "ok" or not record.get("keyword_matches"):
+        if record.get("status") != "ok" or not record.get("keyword_matches") or record.get("lead_priority", "A") != "A":
             continue
         source = record["source_url"]
         domain = company_domain(source)
