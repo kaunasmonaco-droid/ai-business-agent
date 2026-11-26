@@ -88,6 +88,7 @@ def _search_rss(country):
     terms = {
         "LT": ("metalo apdirbimo paslaugos gamintojas site:.lt", "metalo konstrukcijų gamyba įmonė site:.lt",
                "CNC frezavimas tekinimas gaminame site:.lt", "metal fabrication CNC machining Lithuania", "lakštinio metalo apdirbimas lazerinis pjovimas Lietuva", "steel aluminium manufacturing Lithuania"),
+        "UA": ("металообробка виробники Україна", "виробництво металоконструкцій Україна", "metal fabrication manufacturers Ukraine"),
         "DE": ("Metallverarbeitung Hersteller Deutschland", "Blechbearbeitung Hersteller Deutschland"),
         "PL": ("obróbka metali producent Polska", "konstrukcje stalowe producent Polska"),
     }.get(country, (f"metal fabrication manufacturers {country}",))
