@@ -34,6 +34,7 @@ class TextParser(HTMLParser):
         self._in_title = False
         self._ignored = 0
         self.parts = []
+        self.links = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -41,6 +42,8 @@ class TextParser(HTMLParser):
             self._ignored += 1
         elif tag == "title":
             self._in_title = True
+        elif tag == "a" and attrs.get("href"):
+            self.links.append(attrs["href"])
         elif tag == "meta":
             key = (attrs.get("name") or attrs.get("property") or "").lower()
             if key in ("description", "og:description") and not self.description:
@@ -160,6 +163,7 @@ def profile_one(url, keywords=None, fetcher=download_page):
     emails = re.findall(r"(?i)(?<![\w.+-])([\w.+-]+@[\w.-]+\.[a-z]{2,})(?![\w.-])", html)
     generic = sorted({e.lower() for e in emails if e.split("@")[0].lower() in GENERIC_PREFIXES})[:5]
     return {
+        "research_links": [urllib.parse.urljoin(final_url, h) for h in parser.links if any(t in h.casefold() for t in ("contact", "kontakt", "about", "apie", "services", "paslaug", "production", "gamyb", "manufactur"))][:30],
         "source_url": final_url,
         "title": parser.title[:180] or None,
         "description": parser.description[:500] or None,
@@ -222,6 +226,35 @@ def _qualified_discovery_site(record, country):
     return True
 
 
+def enrich_company(record, keywords, country, fetcher):
+    domain = company_domain(record["source_url"])
+    sources = []
+    seen = {record["source_url"]}
+    for link in record.pop("research_links", []):
+        if len(seen) >= 4:
+            break
+        try:
+            link = validate_public_url(urllib.parse.urldefrag(link)[0])
+            if company_domain(link) != domain or link in seen:
+                continue
+            seen.add(link)
+            page = profile_one(link, keywords, fetcher)
+            if company_domain(page["source_url"]) != domain:
+                continue
+            sources.append({k: page[k] for k in ("source_url","title","description","public_evidence_excerpt","keyword_matches","generic_contact_emails")})
+        except Exception:
+            continue
+    record["enrichment_sources"] = sources
+    record["generic_contact_emails"] = sorted(set(record["generic_contact_emails"] + [e for p in sources for e in p["generic_contact_emails"]]))
+    record["keyword_matches"] = sorted(set(record["keyword_matches"] + [e for p in sources for e in p["keyword_matches"]]))
+    record["keyword_match_count"] = len(record["keyword_matches"])
+    combined = dict(record)
+    combined["public_evidence_excerpt"] = " ".join([record.get("public_evidence_excerpt") or ""] + [str(p.get(k) or "") for p in sources for k in ("title","description","public_evidence_excerpt")])
+    if _qualified_discovery_site(combined, country):
+        record["lead_priority"] = combined["lead_priority"]
+    return record
+
+
 def run(payload, fetcher=download_page):
     if not isinstance(payload, dict):
         raise ValueError("Input must be an object")
@@ -277,11 +310,14 @@ def run(payload, fetcher=download_page):
                     record["verification_note"] += " Custom industry candidate; country and commercial fit require review before drafting."
                 elif not _qualified_discovery_site(record, country):
                     continue
+                if record.get("lead_priority") == "B" and not custom_queries:
+                    record = enrich_company(record, keywords, country, fetcher)
                 if record.get("lead_priority") not in ("A", "B"):
                     continue
                 record["qualification_stage"] = "proposal_review" if record["lead_priority"] == "A" else "enrichment_required"
                 record["dedup_key"] = domain + ":international-b2b-outreach"
                 record["verified_buyer_interest"] = False
+            record.pop("research_links", None)
             output.append(record)
         except Exception as exc:
             if not country:
