@@ -277,6 +277,11 @@ def run(payload, fetcher=download_page):
                     record["verification_note"] += " Custom industry candidate; country and commercial fit require review before drafting."
                 elif not _qualified_discovery_site(record, country):
                     continue
+                if record.get("lead_priority") not in ("A", "B"):
+                    continue
+                record["qualification_stage"] = "proposal_review" if record["lead_priority"] == "A" else "enrichment_required"
+                record["dedup_key"] = domain + ":international-b2b-outreach"
+                record["verified_buyer_interest"] = False
             output.append(record)
         except Exception as exc:
             if not country:
