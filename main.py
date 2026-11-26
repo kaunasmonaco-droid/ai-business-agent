@@ -394,6 +394,8 @@ def main():
         with open(args.output, "w", encoding="utf-8") as stream:
             stream.write(output + "\n")
     if actor_mode:
+        # Always publish the webhook consumer contract, even for discovery-only runs.
+        save_apify_drafts([])
         apify_push(result)
     if args.drafts:
         write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
