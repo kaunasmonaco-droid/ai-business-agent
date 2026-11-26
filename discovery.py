@@ -4,6 +4,7 @@ No fabricated leads. Each candidate carries a public source URL.
 """
 from html.parser import HTMLParser
 import json
+import sys
 import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit
@@ -113,14 +114,15 @@ def _search_rss(country, custom_queries=None, custom_keywords=None):
             for item in root.findall(".//item"):
                 link = (item.findtext("link") or "").strip()
                 title = (item.findtext("title") or "").strip()
+                description = (item.findtext("description") or "").casefold()
                 host = (urlsplit(link).hostname or "").lower()
                 path = urlsplit(link).path.lower()
                 if any(part in path for part in ("/blog/", "/article/", "/articles/", "/news/",
                                                  "/what-is-", "/wiki/", "/guide/", "/tutorial/")):
                     continue
-                if (link.startswith("https://") and title and host and
+                if (link.startswith(("http://", "https://")) and title and host and
                         not urlsplit(link).path.lower().endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx")) and
-                        any(word in title.lower() or word in host for word in relevant) and
+                        any(word in title.casefold() or word in host or word in description for word in relevant) and
                         not any(host == d or host.endswith("." + d) for d in excluded)):
                     yield link, title[:160], url
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, ET.ParseError) as exc:
@@ -175,7 +177,7 @@ def find_websites(country, custom_queries=None, custom_keywords=None):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
     seen = set()
     errors = []
-    providers = (lambda c: _search_rss(c, custom_queries, custom_keywords),) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
+    providers = (lambda c: _search_rss(c, custom_queries, custom_keywords),) + (_wikidata,) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
     for provider in providers:
         try:
             for site, name, source in provider(country):
@@ -187,8 +189,10 @@ def find_websites(country, custom_queries=None, custom_keywords=None):
                     return
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             errors.append(f"{provider.__name__}: {type(exc).__name__}: {str(exc)[:140]}")
+            print(errors[-1], file=sys.stderr)
     # No candidates is a valid outcome when public providers time out or return
     # nothing. Let the caller emit a transparent no_qualified_companies record
     # rather than failing the entire Actor run.
     if not seen:
+        print("Discovery returned zero candidates; provider errors: " + str(len(errors)), file=sys.stderr)
         return
