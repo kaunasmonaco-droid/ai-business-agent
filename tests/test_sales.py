@@ -6,6 +6,9 @@ from sales import build_drafts
 
 class SalesPipelineTests(unittest.TestCase):
     def setUp(self):
+        contact = patch("sales.contact_request", return_value={"id": "789"})
+        self.contact_request = contact.start()
+        self.addCleanup(contact.stop)
         self.record = {
             "status": "ok",
             "source_url": "https://www.example.com/contact",
@@ -24,6 +27,8 @@ class SalesPipelineTests(unittest.TestCase):
         self.assertEqual(draft["status"], "draft")
         self.assertIn("metal, export", draft["body"])
         request.assert_called_once()
+        self.assertEqual(draft["hubspot_contact_id"], "789")
+        self.contact_request.assert_called_with("test", "/crm/v4/objects/contacts/789/associations/default/companies/123", method="PUT")
 
     @patch("sales.hubspot_request")
     @patch("sales.ensure_domain_key")
@@ -42,3 +47,4 @@ class SalesPipelineTests(unittest.TestCase):
         self.record["generic_contact_emails"] = ["export@other.example"]
         self.assertEqual(build_drafts([self.record], token="test"), [])
         request.assert_not_called()
+        self.contact_request.assert_not_called()
