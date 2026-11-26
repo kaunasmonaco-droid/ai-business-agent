@@ -20,6 +20,8 @@ from discovery import find_websites
 from sales import build_drafts, company_domain
 
 MAX_SITES = 10
+MAX_DISCOVERY_SITES = 100
+MAX_DISCOVERY_RESULTS = 20
 MAX_BYTES = 1_200_000
 USER_AGENT = "AIBusinessOS-CompanyResearch/0.1 (+public-source-verification)"
 GENERIC_PREFIXES = ("info", "hello", "contact", "sales", "export", "office", "enquiries", "inquiries", "support")
@@ -144,8 +146,12 @@ def profile_one(url, keywords=None, fetcher=download_page):
         "suvirinimas": "welding",
         "metalo pjovimas lazeriu": "laser cutting",
         "lakstinio metalo lankstymas": "sheet metal bending",
+        "metalo apdirbimas": "metalworking",
+        "metalo konstrukciju gamyba": "metal fabrication",
+        "plieno gaminiai": "steel fabrication",
+        "aliuminio detaliu gamyba": "aluminium machining",
     }
-    evidence = body.casefold()
+    evidence = " ".join((parser.title, parser.description, body)).casefold()
     matches = []
     for word in words:
         for term in (word, translations.get(word)):
@@ -181,7 +187,7 @@ def _metal_manufacturer(record):
                "lakštinio metalo", "cnc machining", "metal fabrication",
                "metalworking", "sheet metal", "steel fabrication",
                "metallbearbeitung", "blechbearbeitung", "obróbka metali")
-    return any(term in text for term in phrases)
+    return any(term in text for term in phrases + ("cnc milling", "cnc turning", "cnc frezav", "cnc tekin", "laser cutting", "pjovimas lazeriu", "precision machining")) or bool(record.get("keyword_matches"))
 
 
 def _qualified_discovery_site(record, country):
@@ -197,16 +203,23 @@ def _qualified_discovery_site(record, country):
             "youtube.com", "wikipedia.org", "linkedin.com", "facebook.com",
             "reddit.com", "machinedesign.com")):
         return False
-    if country == "LT" and not (host == "lt" or host.endswith(".lt")):
-        # A foreign TLD may still be Lithuanian, but must be reviewed manually.
-        return False
+    if country == "LT" and not host.endswith(".lt"):
+        source = record.get("discovery_source_url") or ""
+        text = " ".join(str(record.get(k) or "") for k in ("title", "description", "public_evidence_excerpt")).casefold()
+        if source != "https://linpra.lt/nariu-sarasas/" and not any(t in text for t in ("lithuania", "lietuva", "lietuvoje")):
+            return False
     text = " ".join(str(record.get(k) or "") for k in
                     ("title", "description", "public_evidence_excerpt")).lower()
     production = ("gaminame", "gaminami", "gaminame pagal", "gamybos paslaug",
                   "teikiame", "mūsų gamyba", "mūsų įmonė", "mūsų cech",
                   "manufactur", "we produce", "we fabricate", "our factory",
                   "production facilities", "production services", "our workshop")
-    return _metal_manufacturer(record) and any(term in text for term in production)
+    if not _metal_manufacturer(record):
+        return False
+    strong = any(term in text for term in production)
+    contact = any(e.lower().endswith("@" + company_domain(record["source_url"])) for e in record.get("generic_contact_emails", []))
+    record["lead_priority"] = "A" if strong and contact and record.get("keyword_matches") else ("B" if strong or record.get("keyword_matches") else "C")
+    return True
 
 
 def run(payload, fetcher=download_page):
@@ -229,7 +242,7 @@ def run(payload, fetcher=download_page):
         candidates = ((url, None, None) for url in urls)
     attempted = 0
     for website, name, source in candidates:
-        if country and attempted >= 40:
+        if country and attempted >= MAX_DISCOVERY_SITES:
             break
         try:
             if not isinstance(website, str):
@@ -245,17 +258,17 @@ def run(payload, fetcher=download_page):
             record = profile_one(website, keywords, fetcher=fetcher)
             if company_domain(record["source_url"]) != domain:
                 continue
-            if country and not _qualified_discovery_site(record, country):
-                continue
             if country:
                 record["company_name"] = name
                 record["discovery_source_url"] = source
+                if not _qualified_discovery_site(record, country):
+                    continue
             output.append(record)
         except Exception as exc:
             if not country:
                 output.append({"source_url": str(website), "status": "error",
                                "error": str(exc)[:220], "verified_buyer_interest": False})
-        if len(output) >= MAX_SITES:
+        if len(output) >= (MAX_DISCOVERY_RESULTS if country else MAX_SITES):
             break
     if country and not output:
         return [{"status": "no_qualified_companies", "country": country,
