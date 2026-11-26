@@ -1,6 +1,6 @@
 {
   "title": "Research company websites",
-  "description": "Discover metalworking businesses in a country or verify 1–10 supplied official websites.",
+  "description": "Discover businesses in any supported country and industry, or verify supplied official websites.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
@@ -16,7 +16,7 @@
       "maxItems": 10
     },
     "keywords": {
-      "title": "Relevant manufacturing keywords",
+      "title": "Industry keywords",
       "type": "array",
       "editor": "stringList",
       "description": "Terms to match on public pages, e.g. metal fabrication, OEM, forging.",
@@ -42,7 +42,7 @@
       "description": "Optional scope for a one-company trial, e.g. example.com."
     },
     "discovery_country": {
-      "title": "Discover metalworking businesses by country",
+      "title": "Country code (LT, UA, US, GB, etc.)",
       "type": "string",
       "editor": "textfield",
       "description": "Optional two-letter uppercase country code, for example LT. Leave URLs empty for discovery."
@@ -52,6 +52,29 @@
       "type": "boolean",
       "description": "Requires sales_pipeline, company_domain and a secret HUBSPOT_ACCESS_TOKEN.",
       "default": false
+    },
+    "industry": {
+      "title": "Industry",
+      "type": "string",
+      "editor": "textfield",
+      "description": "Industry label for custom discovery."
+    },
+    "search_queries": {
+      "title": "Custom search queries",
+      "type": "array",
+      "editor": "stringList",
+      "description": "Up to six industry and country specific queries.",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 6
+    },
+    "result_limit": {
+      "title": "Maximum results",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 5
     }
   }
 }
