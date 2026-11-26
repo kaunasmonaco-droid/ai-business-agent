@@ -65,7 +65,7 @@ def _wikidata(country):
     query = f"""SELECT DISTINCT ?item ?itemLabel ?website WHERE {{
       ?country wdt:P297 "{country}".
       ?item wdt:P17 ?country; wdt:P856 ?website.
-      ?item (wdt:P31/wdt:P279*|wdt:P452) ?type.
+      ?item (wdt:P31|wdt:P452) ?type.
       VALUES ?type {{ wd:Q4830453 wd:Q783794 wd:Q13235160 }}
       SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,lt". }}
     }} LIMIT 100"""
@@ -181,9 +181,10 @@ def find_websites(country, custom_queries=None, custom_keywords=None):
     for provider in providers:
         try:
             for site, name, source in provider(country):
-                if site in seen:
+                domain = (urlsplit(site).hostname or "").lower().rstrip(".").removeprefix("www.")
+                if not domain or domain in seen:
                     continue
-                seen.add(site)
+                seen.add(domain)
                 yield site, name, source
                 if len(seen) >= 100:
                     return
