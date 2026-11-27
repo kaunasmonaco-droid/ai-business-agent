@@ -172,12 +172,37 @@ def _linpra(country):
         yield site, name, source
 
 
+def _osm_custom(country, keywords):
+    terms=" ".join(keywords or []).casefold()
+    if any(k in terms for k in ("car rental","vehicle rental","alquiler de coches")):
+        selector='["amenity"="car_rental"]'
+    elif any(k in terms for k in ("hotel","hospitality")):
+        selector='["tourism"="hotel"]'
+    else:
+        return
+    query=f'[out:json][timeout:12];area["ISO3166-1"="{country}"]["admin_level"="2"]->.a;(nwr{selector}["website"](area.a);nwr{selector}["contact:website"](area.a););out tags 60;'
+    for endpoint in OVERPASS:
+        try:
+            result=_read_json(endpoint,urlencode({"data":query}).encode(),timeout=16)
+            if result.get("remark") or not isinstance(result.get("elements"),list):
+                raise ValueError("Incomplete Overpass response")
+            for element in result["elements"]:
+                tags=element.get("tags",{})
+                site=tags.get("contact:website") or tags.get("website")
+                if site and tags.get("name"):
+                    yield site,tags["name"],f"https://www.openstreetmap.org/{element['type']}/{element['id']}"
+            return
+        except (HTTPError,URLError,TimeoutError,OSError,ValueError) as exc:
+            print("OSM custom: "+type(exc).__name__,file=sys.stderr)
+    raise RuntimeError("Custom OSM providers unavailable")
+
+
 def find_websites(country, custom_queries=None, custom_keywords=None):
     if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
     seen = set()
     errors = []
-    providers = (lambda c: _search_rss(c, custom_queries, custom_keywords),) + (_wikidata,) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
+    providers = (lambda c: _osm_custom(c, custom_keywords), lambda c: _search_rss(c, custom_queries, custom_keywords), _wikidata) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
     for provider in providers:
         try:
             for site, name, source in provider(country):
