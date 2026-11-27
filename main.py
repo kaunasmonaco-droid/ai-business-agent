@@ -275,8 +275,10 @@ def run(payload, fetcher=download_page):
         raise ValueError("result_limit must be an integer between 1 and 20")
     output = []
     seen = set()
+    diagnostics = []
+    rejected = {}
     if country:
-        candidates = find_websites(country, custom_queries, keywords) if custom_queries else find_websites(country)
+        candidates = find_websites(country, custom_queries, keywords, diagnostics) if custom_queries else find_websites(country, diagnostics=diagnostics)
     else:
         if not isinstance(urls, list) or not 1 <= len(urls) <= MAX_SITES:
             raise ValueError("Provide 1-10 source website URLs")
@@ -320,6 +322,9 @@ def run(payload, fetcher=download_page):
             record.pop("research_links", None)
             output.append(record)
         except Exception as exc:
+            if country:
+                kind=type(exc).__name__
+                rejected[kind]=rejected.get(kind,0)+1
             if not country:
                 output.append({"source_url": str(website), "status": "error",
                                "error": str(exc)[:220], "verified_buyer_interest": False})
@@ -327,7 +332,7 @@ def run(payload, fetcher=download_page):
             break
     if country and not output:
         return [{"status": "no_qualified_companies", "country": country,
-                 "attempted_sites": attempted,
+                 "attempted_sites": attempted, "provider_diagnostics": diagnostics, "site_errors": rejected,
                  "error": "No matching company websites found in this run",
                  "verified_buyer_interest": False}]
     return output
