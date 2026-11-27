@@ -4,6 +4,7 @@ No fabricated leads. Each candidate carries a public source URL.
 """
 from html.parser import HTMLParser
 import json
+import os
 import sys
 import re
 import xml.etree.ElementTree as ET
@@ -197,13 +198,30 @@ def _osm_custom(country, keywords):
     raise RuntimeError("Custom OSM providers unavailable")
 
 
+def _brave_search(country, queries):
+    key = os.getenv("BRAVE_SEARCH_API_KEY")
+    if not key:
+        raise RuntimeError("BRAVE_SEARCH_API_KEY not configured")
+    for query in queries[:3]:
+        url = "https://api.search.brave.com/res/v1/web/search?" + urlencode({"q":query,"country":country,"count":10})
+        req = Request(url, headers={"Accept":"application/json","X-Subscription-Token":key})
+        with urlopen(req, timeout=12) as response:
+            raw = response.read(1_000_001)
+        if len(raw)>1_000_000:
+            raise ValueError("Oversized search response")
+        for row in json.loads(raw).get("web",{}).get("results",[]):
+            site=row.get("url","")
+            if site.startswith(("https://","http://")) and row.get("title"):
+                yield site,row["title"][:160],site
+
+
 def find_websites(country, custom_queries=None, custom_keywords=None, diagnostics=None):
     if not isinstance(country, str) or not re.fullmatch(r"[A-Z]{2}", country):
         raise ValueError("discovery_country must be a two-letter uppercase country code")
     seen = set()
     errors = []
-    providers = (lambda c: _osm_custom(c, custom_keywords), lambda c: _search_rss(c, custom_queries, custom_keywords), _wikidata) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
-    names = ("osm_sector", "bing_rss", "wikidata") if custom_queries else ("linpra", "bing_rss", "osm", "wikidata")
+    providers = (lambda c: _brave_search(c, custom_queries), lambda c: _osm_custom(c, custom_keywords), lambda c: _search_rss(c, custom_queries, custom_keywords), _wikidata) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
+    names = ("brave_search", "osm_sector", "bing_rss", "wikidata") if custom_queries else ("linpra", "bing_rss", "osm", "wikidata")
     for provider, provider_name in zip(providers, names):
         count = 0
         try:
