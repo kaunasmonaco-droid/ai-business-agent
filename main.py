@@ -2,6 +2,8 @@
 import argparse
 import csv
 import io
+import http.client
+import ssl
 import ipaddress
 import json
 import os
@@ -14,7 +16,12 @@ import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 
+from discovery import find_websites
+from sales import build_drafts, company_domain
+
 MAX_SITES = 10
+MAX_DISCOVERY_SITES = 100
+MAX_DISCOVERY_RESULTS = 20
 MAX_BYTES = 1_200_000
 USER_AGENT = "AIBusinessOS-CompanyResearch/0.1 (+public-source-verification)"
 GENERIC_PREFIXES = ("info", "hello", "contact", "sales", "export", "office", "enquiries", "inquiries", "support")
@@ -27,6 +34,7 @@ class TextParser(HTMLParser):
         self._in_title = False
         self._ignored = 0
         self.parts = []
+        self.links = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -34,6 +42,8 @@ class TextParser(HTMLParser):
             self._ignored += 1
         elif tag == "title":
             self._in_title = True
+        elif tag == "a" and attrs.get("href"):
+            self.links.append(attrs["href"])
         elif tag == "meta":
             key = (attrs.get("name") or attrs.get("property") or "").lower()
             if key in ("description", "og:description") and not self.description:
@@ -80,32 +90,51 @@ def public_dns(host):
     ips = {record[4][0] for record in records}
     if not ips or any(not ipaddress.ip_address(ip).is_global for ip in ips):
         raise ValueError("Target resolved to a non-public address")
+    return sorted(ips)
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
+class PublicHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        addresses = public_dns(self.host)
+        error = None
+        for address in addresses:
+            try:
+                raw = socket.create_connection((address, self.port), self.timeout)
+                try:
+                    self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+                except BaseException:
+                    raw.close()
+                    raise
+                return
+            except OSError as exc:
+                error = exc
+        raise error
+
 
 def download_page(url):
-    opener = urllib.request.build_opener(NoRedirect)
     for _ in range(3):
         url = validate_public_url(url)
-        public_dns(urllib.parse.urlsplit(url).hostname)
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+        parsed = urllib.parse.urlsplit(url)
+        path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+        connection = PublicHTTPSConnection(parsed.hostname, timeout=9, context=ssl.create_default_context())
         try:
-            with opener.open(req, timeout=9) as res:
-                content_type = (res.headers.get("Content-Type") or "").lower()
+            connection.request("GET", path, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+            with connection.getresponse() as response:
+                if response.status in (301, 302, 303, 307, 308) and response.getheader("Location"):
+                    url = urllib.parse.urljoin(url, response.getheader("Location"))
+                    continue
+                if not 200 <= response.status < 300:
+                    raise ValueError(f"Website returned HTTP {response.status}")
+                content_type = (response.getheader("Content-Type") or "").lower()
                 if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
                     raise ValueError("Not an HTML page")
-                data = res.read(MAX_BYTES + 1)
+                data = response.read(MAX_BYTES + 1)
                 if len(data) > MAX_BYTES:
                     raise ValueError("Page too large")
                 return url, data.decode("utf-8", errors="replace")
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
-                url = urllib.parse.urljoin(url, e.headers["Location"])
-                continue
-            raise
+        finally:
+            connection.close()
     raise ValueError("Too many redirects")
+
 
 def profile_one(url, keywords=None, fetcher=download_page):
     validated_url = validate_public_url(url)
@@ -114,10 +143,27 @@ def profile_one(url, keywords=None, fetcher=download_page):
     parser.feed(html)
     body = re.sub(r"\s+", " ", " ".join(parser.parts))[:7000]
     words = [str(x).strip().lower() for x in (keywords or []) if str(x).strip()][:10]
-    matches = [word for word in words if word in body.lower()]
+    translations = {
+        "cnc frezavimas": "cnc milling",
+        "cnc tekinimas": "cnc turning",
+        "suvirinimas": "welding",
+        "metalo pjovimas lazeriu": "laser cutting",
+        "lakstinio metalo lankstymas": "sheet metal bending",
+        "metalo apdirbimas": "metalworking",
+        "metalo konstrukciju gamyba": "metal fabrication",
+        "plieno gaminiai": "steel fabrication",
+        "aliuminio detaliu gamyba": "aluminium machining",
+    }
+    evidence = " ".join((parser.title, parser.description, body)).casefold()
+    matches = []
+    for word in words:
+        for term in (word, translations.get(word)):
+            if term and term in evidence and term not in matches:
+                matches.append(term)
     emails = re.findall(r"(?i)(?<![\w.+-])([\w.+-]+@[\w.-]+\.[a-z]{2,})(?![\w.-])", html)
     generic = sorted({e.lower() for e in emails if e.split("@")[0].lower() in GENERIC_PREFIXES})[:5]
     return {
+        "research_links": [urllib.parse.urljoin(final_url, h) for h in parser.links if any(t in h.casefold() for t in ("contact", "kontakt", "about", "apie", "services", "paslaug", "production", "gamyb", "manufactur"))][:30],
         "source_url": final_url,
         "title": parser.title[:180] or None,
         "description": parser.description[:500] or None,
@@ -131,24 +177,164 @@ def profile_one(url, keywords=None, fetcher=download_page):
         "status": "ok",
     }
 
+def _metal_manufacturer(record):
+    """Require specific production evidence, not generic words such as 'gamyba'."""
+    text = " ".join(str(record.get(k) or "") for k in
+                    ("title", "description", "public_evidence_excerpt")).lower()
+    negatives = ("kolegija", "college", "university", "universitet", "academy",
+                 "akademija", "supermarket", "grocery", "prekybos tinklas",
+                 "bank", "ministerija", "municipality", "school")
+    if any(term in text for term in negatives):
+        return False
+    phrases = ("metalo apdirb", "metalo konstrukc", "metalo gamyb",
+               "metalo lankst", "metalo pjov", "metalo suvirin",
+               "lakštinio metalo", "cnc machining", "metal fabrication",
+               "metalworking", "sheet metal", "steel fabrication",
+               "metallbearbeitung", "blechbearbeitung", "obróbka metali")
+    return any(term in text for term in phrases + ("cnc milling", "cnc turning", "cnc frezav", "cnc tekin", "laser cutting", "pjovimas lazeriu", "precision machining")) or bool(record.get("keyword_matches"))
+
+
+def _qualified_discovery_site(record, country):
+    """Conservative screening: official-looking manufacturing site, not an article."""
+    url = urllib.parse.urlsplit(record.get("source_url") or "")
+    host = (url.hostname or "").lower()
+    path = url.path.lower()
+    if any(segment in path for segment in ("/blog/", "/articles/", "/article/", "/news/",
+                                           "/what-is-", "/wiki/", "/guides/", "/tutorial/")):
+        return False
+    if any(host == domain or host.endswith("." + domain) for domain in
+           ("thomasnet.com", "cnccookbook.com", "medium.com", "substack.com",
+            "youtube.com", "wikipedia.org", "linkedin.com", "facebook.com",
+            "reddit.com", "machinedesign.com")):
+        return False
+    if country == "LT" and not host.endswith(".lt"):
+        source = record.get("discovery_source_url") or ""
+        text = " ".join(str(record.get(k) or "") for k in ("title", "description", "public_evidence_excerpt")).casefold()
+        if source != "https://linpra.lt/nariu-sarasas/" and not any(t in text for t in ("lithuania", "lietuva", "lietuvoje")):
+            return False
+    text = " ".join(str(record.get(k) or "") for k in
+                    ("title", "description", "public_evidence_excerpt")).lower()
+    production = ("gaminame", "gaminami", "gaminame pagal", "gamybos paslaug",
+                  "teikiame", "mūsų gamyba", "mūsų įmonė", "mūsų cech",
+                  "manufactur", "we produce", "we fabricate", "our factory",
+                  "production facilities", "production services", "our workshop")
+    if not _metal_manufacturer(record):
+        return False
+    strong = any(term in text for term in production)
+    contact = any(e.lower().endswith("@" + company_domain(record["source_url"])) for e in record.get("generic_contact_emails", []))
+    record["lead_priority"] = "A" if strong and contact and record.get("keyword_matches") else ("B" if strong or record.get("keyword_matches") else "C")
+    return True
+
+
+def enrich_company(record, keywords, country, fetcher):
+    domain = company_domain(record["source_url"])
+    sources = []
+    seen = {record["source_url"]}
+    for link in record.pop("research_links", []):
+        if len(seen) >= 4:
+            break
+        try:
+            link = validate_public_url(urllib.parse.urldefrag(link)[0])
+            if company_domain(link) != domain or link in seen:
+                continue
+            seen.add(link)
+            page = profile_one(link, keywords, fetcher)
+            if company_domain(page["source_url"]) != domain:
+                continue
+            sources.append({k: page[k] for k in ("source_url","title","description","public_evidence_excerpt","keyword_matches","generic_contact_emails")})
+        except Exception:
+            continue
+    record["enrichment_sources"] = sources
+    record["generic_contact_emails"] = sorted(set(record["generic_contact_emails"] + [e for p in sources for e in p["generic_contact_emails"]]))
+    record["keyword_matches"] = sorted(set(record["keyword_matches"] + [e for p in sources for e in p["keyword_matches"]]))
+    record["keyword_match_count"] = len(record["keyword_matches"])
+    combined = dict(record)
+    combined["public_evidence_excerpt"] = " ".join([record.get("public_evidence_excerpt") or ""] + [str(p.get(k) or "") for p in sources for k in ("title","description","public_evidence_excerpt")])
+    if _qualified_discovery_site(combined, country):
+        record["lead_priority"] = combined["lead_priority"]
+    return record
+
+
 def run(payload, fetcher=download_page):
-    urls = payload.get("urls", []) if isinstance(payload, dict) else []
-    if not isinstance(urls, list) or not (1 <= len(urls) <= MAX_SITES):
-        raise ValueError("Provide 1–10 source website URLs")
+    if not isinstance(payload, dict):
+        raise ValueError("Input must be an object")
+    urls = payload.get("urls", [])
+    country = payload.get("discovery_country")
+    if country and urls:
+        raise ValueError("Choose discovery_country or supplied urls, not both")
     keywords = payload.get("keywords", [])
     if not isinstance(keywords, list):
         raise ValueError("keywords must be an array")
+    custom_queries = payload.get("search_queries", [])
+    if not isinstance(custom_queries, list) or len(custom_queries) > 6 or any(not isinstance(q, str) or not q.strip() or len(q) > 300 for q in custom_queries):
+        raise ValueError("search_queries must contain up to six nonempty search strings")
+    if custom_queries and (not country or not keywords or any(not isinstance(k, str) or not k.strip() for k in keywords)):
+        raise ValueError("Custom discovery requires country and nonempty keywords")
+    result_limit = payload.get("result_limit", MAX_DISCOVERY_RESULTS)
+    if type(result_limit) is not int or not 1 <= result_limit <= MAX_DISCOVERY_RESULTS:
+        raise ValueError("result_limit must be an integer between 1 and 20")
     output = []
     seen = set()
-    for url in urls:
-        if url in seen:
-            continue
-        seen.add(url)
+    diagnostics = []
+    rejected = {}
+    if country:
+        candidates = find_websites(country, custom_queries, keywords, diagnostics) if custom_queries else find_websites(country, diagnostics=diagnostics)
+    else:
+        if not isinstance(urls, list) or not 1 <= len(urls) <= MAX_SITES:
+            raise ValueError("Provide 1-10 source website URLs")
+        candidates = ((url, None, None) for url in urls)
+    attempted = 0
+    for website, name, source in candidates:
+        if country and attempted >= MAX_DISCOVERY_SITES:
+            break
         try:
-            output.append(profile_one(url, keywords, fetcher=fetcher))
-        except Exception as e:
-            output.append({"source_url": str(url), "status": "error",
-                           "error": str(e)[:220], "verified_buyer_interest": False})
+            if not isinstance(website, str):
+                continue
+            if website.startswith("http://"):
+                website = "https://" + website[7:]
+            website = validate_public_url(website)
+            domain = company_domain(website)
+            if domain in seen:
+                continue
+            seen.add(domain)
+            attempted += 1
+            record = profile_one(website, keywords, fetcher=fetcher)
+            if company_domain(record["source_url"]) != domain:
+                continue
+            if country:
+                record["company_name"] = name
+                record["discovery_source_url"] = source
+                if custom_queries:
+                    if not record.get("keyword_matches"):
+                        continue
+                    record["lead_priority"] = "B"
+                    record["industry"] = str(payload.get("industry", "custom"))[:100]
+                    record["verification_note"] += " Custom industry candidate; country and commercial fit require review before drafting."
+                elif not _qualified_discovery_site(record, country):
+                    continue
+                if record.get("lead_priority") == "B" and not custom_queries:
+                    record = enrich_company(record, keywords, country, fetcher)
+                if record.get("lead_priority") not in ("A", "B"):
+                    continue
+                record["qualification_stage"] = "proposal_review" if record["lead_priority"] == "A" else "enrichment_required"
+                record["dedup_key"] = domain + ":international-b2b-outreach"
+                record["verified_buyer_interest"] = False
+            record.pop("research_links", None)
+            output.append(record)
+        except Exception as exc:
+            if country:
+                kind=type(exc).__name__
+                rejected[kind]=rejected.get(kind,0)+1
+            if not country:
+                output.append({"source_url": str(website), "status": "error",
+                               "error": str(exc)[:220], "verified_buyer_interest": False})
+        if len(output) >= (result_limit if country else MAX_SITES):
+            break
+    if country and not output:
+        return [{"status": "no_qualified_companies", "country": country,
+                 "attempted_sites": attempted, "provider_diagnostics": diagnostics, "site_errors": rejected,
+                 "error": "No matching company websites found in this run",
+                 "verified_buyer_interest": False}]
     return output
 
 def apify_get_input():
@@ -182,7 +368,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", help="Local JSON input path, no API token required")
     parser.add_argument("--output", help="Optional JSON output path")
+    parser.add_argument("--from-results", help="Replay an existing Apify JSON export")
+    parser.add_argument("--drafts", help="Write proposal drafts to this JSON path")
+    parser.add_argument("--company-domain", help="Process only this domain in the sales stage")
+    parser.add_argument("--sync-hubspot", action="store_true", help="Write to HubSpot using HUBSPOT_ACCESS_TOKEN")
     args = parser.parse_args()
+    if args.input and args.from_results:
+        parser.error("Choose either --input or --from-results")
+    if args.sync_hubspot and not args.drafts:
+        parser.error("--sync-hubspot requires --drafts")
+    if args.from_results:
+        with open(args.from_results, encoding="utf-8") as stream:
+            result = json.load(stream)
+        if not isinstance(result, list) or not all(isinstance(row, dict) for row in result):
+            parser.error("Expected a JSON array of Apify result objects")
+        write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
+        return
+    actor_mode = not args.input
     if args.input:
         with open(args.input, encoding="utf-8") as stream:
             payload = json.load(stream)
@@ -196,8 +398,45 @@ def main():
     if args.output:
         with open(args.output, "w", encoding="utf-8") as stream:
             stream.write(output + "\n")
-    if not args.input:
+    if actor_mode:
+        # Always publish the webhook consumer contract, even for discovery-only runs.
+        save_apify_drafts([])
         apify_push(result)
+    if args.drafts:
+        write_drafts(result, args.drafts, args.company_domain, args.sync_hubspot)
+    elif actor_mode and payload.get("sales_pipeline") is True:
+        sync = payload.get("sync_hubspot") is True
+        if sync and not payload.get("company_domain") and not payload.get("discovery_country"):
+            raise ValueError("Specify company_domain or discovery_country for CRM sync")
+        drafts = write_drafts(result, None, payload.get("company_domain"), sync)
+        save_apify_drafts(drafts)
+
+def write_drafts(records, path, domain, sync):
+    token = os.getenv("HUBSPOT_ACCESS_TOKEN") if sync else None
+    if sync and not token:
+        raise SystemExit("HUBSPOT_ACCESS_TOKEN is required for CRM writes")
+    drafts = build_drafts(records, token, domain)
+    if not drafts and sync:
+        print("No qualified companies with same-domain public business contacts", file=sys.stderr)
+    if path:
+        with open(path, "w", encoding="utf-8") as stream:
+            json.dump(drafts, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+    return drafts
+
+
+def save_apify_drafts(drafts):
+    store = os.environ["APIFY_DEFAULT_KEY_VALUE_STORE_ID"]
+    token = os.environ["APIFY_TOKEN"]
+    base = os.getenv("APIFY_API_BASE_URL", "https://api.apify.com").rstrip("/")
+    endpoint = f"{base}/v2/key-value-stores/{urllib.parse.quote(store, safe='')}/records/PROPOSAL_DRAFTS"
+    request = urllib.request.Request(
+        endpoint, method="PUT", data=json.dumps(drafts, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+    )
+    with urllib.request.urlopen(request, timeout=20):
+        pass
+
 
 if __name__ == "__main__":
     main()

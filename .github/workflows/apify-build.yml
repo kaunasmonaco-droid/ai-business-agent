@@ -1,0 +1,71 @@
+name: Build AI Business OS in Apify
+
+on:
+  push:
+    branches:
+      - apify-hubspot-proposal-drafts
+    paths:
+      - '**/*.py'
+      - 'Dockerfile'
+      - '.actor/**'
+      - 'actor/**'
+      - 'requirements.txt'
+      - '.github/workflows/apify-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apify-build-ai-business-os
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check API secret exists
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          if [ -z "$APIFY_TOKEN" ]; then
+            echo "::error::APIFY_TOKEN repository secret is missing"
+            exit 1
+          fi
+      - name: Trigger and verify Apify build (no Actor run)
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          APIFY_ACTOR_ID: aibusinessos~ai-business-agent
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          actor = os.environ["APIFY_ACTOR_ID"]
+          token = os.environ["APIFY_TOKEN"]
+          base = "https://api.apify.com/v2/acts/" + actor + "/builds"
+          def request(url, method="GET"):
+              req = urllib.request.Request(url, method=method,
+                  headers={"Authorization": "Bearer " + token,
+                           "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=35) as res:
+                      return json.load(res)["data"]
+              except urllib.error.HTTPError as exc:
+                  raise RuntimeError(f"Apify API HTTP {exc.code}; verify actor access and token scopes") from None
+          data = request(base + "?version=0.0&waitForFinish=0", "POST")
+          build_id = data.get("id")
+          if not build_id:
+              raise RuntimeError("Apify did not return build id")
+          print("Apify build started:", build_id)
+          for attempt in range(50):
+              time.sleep(12)
+              result = request(base + "/" + build_id)
+              status = result.get("status", "UNKNOWN")
+              if status in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
+                  print("Apify build status:", status)
+                  if status != "SUCCEEDED":
+                      raise RuntimeError("Apify build unsuccessful: " + status)
+                  break
+          else:
+              raise RuntimeError("Apify build did not finish in 10 minutes")
+          PY
