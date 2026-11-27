@@ -203,7 +203,8 @@ def find_websites(country, custom_queries=None, custom_keywords=None, diagnostic
     seen = set()
     errors = []
     providers = (lambda c: _osm_custom(c, custom_keywords), lambda c: _search_rss(c, custom_queries, custom_keywords), _wikidata) if custom_queries else (_linpra, _search_rss, _osm, _wikidata)
-    for provider in providers:
+    names = ("osm_sector", "bing_rss", "wikidata") if custom_queries else ("linpra", "bing_rss", "osm", "wikidata")
+    for provider, provider_name in zip(providers, names):
         count = 0
         try:
             for site, name, source in provider(country):
@@ -216,11 +217,11 @@ def find_websites(country, custom_queries=None, custom_keywords=None, diagnostic
                 if len(seen) >= 100:
                     return
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
-            errors.append(f"{provider.__name__}: {type(exc).__name__}: {str(exc)[:140]}")
+            errors.append(f"{provider_name}: {type(exc).__name__}: {str(exc)[:140]}")
             print(errors[-1], file=sys.stderr)
-            if diagnostics is not None: diagnostics.append({'provider':provider.__name__,'error':errors[-1],'candidates':count})
+            if diagnostics is not None: diagnostics.append({'provider':provider_name,'error':errors[-1],'candidates':count})
         else:
-            if diagnostics is not None: diagnostics.append({'provider':provider.__name__,'candidates':count})
+            if diagnostics is not None: diagnostics.append({'provider':provider_name,'candidates':count})
     # No candidates is a valid outcome when public providers time out or return
     # nothing. Let the caller emit a transparent no_qualified_companies record
     # rather than failing the entire Actor run.
